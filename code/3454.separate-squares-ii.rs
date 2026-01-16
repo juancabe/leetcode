@@ -55,122 +55,142 @@ struct Solution;
 //
 
 //  // @submit start
-
-struct Square {
-    // bottom x
-    x: f64,
-    // bottom y
-    y: f64,
-    dx: f64,
-    dy: f64,
+#[derive(Clone, Copy)]
+enum EventKind {
+    On,
+    Off,
 }
 
-impl Square {
-    fn new(x: f64, y: f64, dx: f64, dy: f64) -> Self {
-        Self { x, y, dx, dy }
-    }
+#[derive(Clone, Copy)]
+struct Event {
+    y: i32,
+    kind: EventKind,
+    xs: [i32; 2],
+}
 
-    #[inline]
-    fn max_x(&self) -> f64 {
-        self.x + self.dx
-    }
-
-    #[inline]
-    fn max_y(&self) -> f64 {
-        self.y + self.dy
-    }
-
-    fn add_splits(&self, other: &Square, to_add_squares: &mut Vec<Square>) -> usize {
-        todo!()
-    }
-
-    #[inline]
-    fn bottom_area(&self, div_y: f64) -> f64 {
-        let v_side_left = match div_y.total_cmp(&self.max_y()) {
-            std::cmp::Ordering::Less => match div_y.total_cmp(&self.y) {
-                std::cmp::Ordering::Less | std::cmp::Ordering::Equal => 0.0,
-                std::cmp::Ordering::Greater => div_y - self.y,
-            },
-            std::cmp::Ordering::Equal | std::cmp::Ordering::Greater => self.dy,
+impl Event {
+    fn from_sq(sq: &[i32]) -> [Self; 2] {
+        let xs = [sq[0], sq[0] + sq[2]];
+        let on = Self {
+            y: sq[1],
+            kind: EventKind::On,
+            xs,
         };
-        v_side_left * self.dx
+        let off = Self {
+            y: sq[1] + sq[2],
+            kind: EventKind::Off,
+            xs,
+        };
+
+        [on, off]
+    }
+}
+
+struct SegmentTree {
+    counts: Vec<i32>,
+    covered_len: Vec<i64>,
+    coords: Vec<i32>,
+    n: usize,
+}
+
+impl SegmentTree {
+    fn new(xs: Vec<i32>) -> Self {
+        let n = xs.len();
+        let size = 4 * n;
+        Self {
+            counts: vec![0; size],
+            covered_len: vec![0; size],
+            coords: xs,
+            n,
+        }
     }
 
-    fn add_from_sq_and_right_sqs(
-        sq: [f64; 3],
-        right: impl Iterator<Item = [f64; 3]>,
-        pool: &mut Vec<Square>,
-        holds_ret_arena: &mut Vec<Square>,
-        swap_arena: &mut Vec<Square>,
-    ) {
-        use std::mem;
-
-        let [x, y, len] = sq;
-        holds_ret_arena.clear();
-        holds_ret_arena.push(Square::new(x, y, len, len));
-
-        for [ox, oy, ol] in right {
-            let new_sq = Square::new(ox, oy, ol, ol);
-            swap_arena.clear();
-            for sq in holds_ret_arena.iter() {
-                sq.add_splits(&new_sq, swap_arena);
+    fn update(&mut self, node: usize, start: usize, end: usize, l: usize, r: usize, val: i32) {
+        if l <= start && end <= r {
+            self.counts[node] += val;
+        } else {
+            let mid = (start + end) / 2;
+            if l < mid {
+                self.update(node * 2, start, mid, l, r, val);
             }
-            mem::swap(holds_ret_arena, swap_arena);
+            if r > mid {
+                self.update(node * 2 + 1, mid, end, l, r, val);
+            }
         }
+        self.push_up(node, start, end);
+    }
 
-        pool.append(holds_ret_arena);
+    fn push_up(&mut self, node: usize, start: usize, end: usize) {
+        if self.counts[node] > 0 {
+            self.covered_len[node] = (self.coords[end] - self.coords[start]) as i64;
+        } else if end - start > 1 {
+            self.covered_len[node] = self.covered_len[node * 2] + self.covered_len[node * 2 + 1];
+        } else {
+            self.covered_len[node] = 0;
+        }
     }
 }
 
 impl Solution {
     #[allow(dead_code)]
     pub fn separate_squares(squares: Vec<Vec<i32>>) -> f64 {
-        let mut squares_f = Vec::new();
-        let mut arena0 = Vec::new();
-        let mut arena1 = Vec::new();
+        let mut xs: Vec<i32> = squares
+            .iter()
+            .flat_map(|sq| [sq[0], sq[0] + sq[2]])
+            .collect();
+        xs.sort_unstable();
+        xs.dedup();
 
-        for i in 0..squares.len() {
-            let sq = &squares[i];
-            let sq = [sq[0] as f64, sq[1] as f64, sq[2] as f64];
-            Square::add_from_sq_and_right_sqs(
-                sq,
-                squares[i + 1..]
-                    .iter()
-                    .map(|sq| [sq[0] as f64, sq[1] as f64, sq[2] as f64]),
-                &mut squares_f,
-                &mut arena0,
-                &mut arena1,
-            );
+        let mut events: Vec<Event> = squares.iter().flat_map(|sq| Event::from_sq(sq)).collect();
+        events.sort_unstable_by_key(|ev| ev.y);
+
+        let mut st = SegmentTree::new(xs.clone());
+        let mut total_area: f64 = 0.0;
+
+        // First pass: Calculate total area
+        for i in 0..events.len() - 1 {
+            let event = events[i];
+            let idx_l = xs.binary_search(&event.xs[0]).unwrap();
+            let idx_r = xs.binary_search(&event.xs[1]).unwrap();
+
+            let val = match event.kind {
+                EventKind::On => 1,
+                EventKind::Off => -1,
+            };
+
+            st.update(1, 0, st.n - 1, idx_l, idx_r, val);
+            let height = (events[i + 1].y - event.y) as f64;
+            total_area += height * st.covered_len[1] as f64;
         }
 
-        let squares = squares_f;
+        // Reset Tree for Second Pass
+        st = SegmentTree::new(xs.clone());
+        let mut current_area: f64 = 0.0;
+        let target = total_area / 2.0;
 
-        let mut max_y = squares
-            .iter()
-            .max_by(|sq0, sq1| sq0.y.total_cmp(&sq1.y))
-            .unwrap()
-            .y;
+        for i in 0..events.len() - 1 {
+            let event = events[i];
+            let idx_l = xs.binary_search(&event.xs[0]).unwrap();
+            let idx_r = xs.binary_search(&event.xs[1]).unwrap();
 
-        let mut min_y = squares
-            .iter()
-            .min_by(|sq0, sq1| sq0.y.total_cmp(&sq1.y))
-            .unwrap()
-            .y;
+            let val = match event.kind {
+                EventKind::On => 1,
+                EventKind::Off => -1,
+            };
 
-        let total_area: f64 = squares.iter().map(|sq| sq.bottom_area(max_y + 1.0)).sum();
-        let desired_area = total_area / 2.0;
+            st.update(1, 0, st.n - 1, idx_l, idx_r, val);
 
-        for _ in 0..100 {
-            let mid = (max_y + min_y) / 2.0;
-            let area: f64 = squares.iter().map(|sq| sq.bottom_area(mid)).sum();
-            if area < desired_area {
-                min_y = mid;
-            } else {
-                max_y = mid;
+            let width = st.covered_len[1] as f64;
+            let height = (events[i + 1].y - event.y) as f64;
+            let area_segment = width * height;
+
+            if current_area + area_segment >= target - 1e-11 {
+                return event.y as f64 + (target - current_area) / width;
             }
+            current_area += area_segment;
         }
 
-        (max_y + min_y) / 2.0
+        events.last().unwrap().y as f64
     }
 }
 //  // @submit end

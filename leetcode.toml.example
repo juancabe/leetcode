@@ -1,0 +1,20 @@
+[code]
+editor = "hx"
+test = true
+lang = "rust"
+edit_code_marker = true
+start_marker = "// @submit start"
+end_marker = "// @submit end"
+comment_problem_desc = true
+comment_leading = "// "
+
+[cookies]
+csrf = "YOUR_CSRF"
+session = "YOUR_SESSION_JWT"
+site = "leetcode.com"
+
+[storage]
+cache = "Problems"
+code = "code"
+root = "~/.leetcode"
+scripts = "scripts"
